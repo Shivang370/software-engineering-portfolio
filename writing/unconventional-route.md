@@ -1,0 +1,7 @@
+## An Unconventional Route in My Experience
+
+One unconventional path I took was leading the migration of a TIBCO-based sortation scan system to a modern event-driven architecture. The initiative initially relied on a GenAI-based conversion approach to transform TIBCO workflows into a Java Spring Boot structure following DTO, Repository, and Service design patterns. However, despite extensive prompt tuning, the conversion efficiency remained below 50%. Given the project timelines, my team and I took ownership of the migration and redesigned the solution as a Kafka-driven, microservices-based event architecture.
+
+The transition came with significant uncertainty, as I had little prior experience with TIBCO workflows. To bridge the knowledge gap, I adopted a structured learning approach, breaking down the domain into smaller goals, understanding key concepts and terminology, and using TIBCO tools to analyze and comprehend the existing business logic. In parallel, my team and I consistently engaged with stakeholders to clarify evolving requirements and maintain detailed documentation, ensuring the implementation remained aligned with changing expectations and architectural decisions.
+
+This experience reinforced that technical growth does not always follow a predictable path. It strengthened my ability to learn independently, navigate ambiguity, collaborate effectively, and make informed decisions while driving complex modernization initiatives to successful outcomes.

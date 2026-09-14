@@ -85,19 +85,201 @@ Junit Test cases covering various scenarios followed by qa validation and regres
 
 Implementing Unleash Enterprise required both technical and organizational considerations. One of the primary prerequisites was procuring and onboarding a hybrid Unleash Enterprise license that could support feature flag management across multiple environments and services.
 
-A key challenge was establishing a consistent feature flag strategy across different environments (DEV, QA, UAT, and PROD) while ensuring proper governance and preventing configuration drift. The team also had to become familiar with the Unleash dashboard, feature toggle lifecycle management, rollout strategies, and operational processes for enabling or disabling features as business needs evolved.
+Key Challenges : 
+
+1. Context-Aware Flag Evaluation
+Challenge
+
+Different teams want to evaluate flags using different attributes:
+
+- userId
+- customerId
+- sessionId
+- IP address
+- region
+- customer type
+- journey type
+- custom attributes
+
+Customization : Build a generic context builder :
+
+FeatureContext context = FeatureContext.builder()
+.userId(userId)
+.region(region)
+.customerType(customerType)
+.addProperty("journey", journey)
+.build();
+
+How to Handle :
+* Standardize context creation
+* Validate mandatory fields
+* Prevent teams from sending arbitrary context structures
+* Mask sensitive fields
+
+2. Performance & Caching
+Challenge
+
+A common misconception is that every flag check calls Unleash.
+
+In reality, SDKs cache flags locally, but:
+
+- Cache refresh intervals need tuning
+- Stale configurations may exist
+- Large numbers of flags increase memory footprint
+
+Customization : Expose wrapper configurations : YAML :
+
+feature-flags: flag_name
+refresh-interval: 10s
+cache-enabled: true
+
+
+How to Handle :
+* Tune refresh intervals
+* Add local fallback cache
+* Prevent excessive polling
+
+
+3. Feature Flag Variants & A/B Testing
+Challenge
+
+Simple booleans are easy. Variants introduce complexity :
+
+- CHECKOUT_V1
+- CHECKOUT_V2
+- CHECKOUT_V3
+
+Customization : Strongly typed variant support :
+
+CheckoutVariant variant =
+featureFlagService.getVariant("checkout");
+
+How to Handle :
+* Enum-based variants
+* Sticky user allocation
+* Traffic distribution monitoring
+
+4. Wrapper Evolution & SDK Compatibility
+Challenge
+
+Wrapper library sits between services and Unleash.
+
+When Unleash releases:
+
+- New strategies
+- New variants
+- New context fields
+
+wrapper may hide those capabilities.
+
+
+How to Handle :
+* Design extension points
+* Avoid over-abstraction
+* Maintain backward compatibility
+
+5. Multi-Environment Consistency
+Challenge
+
+Flags differ across:
+
+- DEV
+- QA
+- UAT
+- PROD
+
+Teams often forget to synchronize configurations.
+
+Customization : Provide environment validation APIs : validateFlagParity();
+
+How to Handle :
+* Missing configuration detection
+* Environment drift reporting
+* Automated promotion pipelines
+
+
+6. Observability
+Challenge
+
+Teams don't know:
+
+- Which flags are being used
+- How often they're evaluated
+- Which strategy matched
+
+Customization : Add Micrometer metrics :
+
+ feature_flag_evaluation_total
+ feature_flag_enabled_total
+ feature_flag_fallback_total
+
+How to Handle :
+* Prometheus metrics
+* CloudWatch dashboards
+* Grafana visualizations
+* Structured logging
+
+
+7. Failure Resiliency
+Challenge
+
+What happens when :
+
+- Unleash server is unavailable?
+- Network connectivity drops?
+- Configuration refresh fails?
+
+Customization : wrapper must continue operating :
+
+featureFlagService.isEnabled(
+"new-checkout",
+context,
+false
+); where false becomes the fallback.
+
+How to Handle : 
+* Offline mode support
+* Default values
+* Circuit breakers
+* Graceful degradation
 
 Another important aspect was implementing role-based access control, as feature flag management needed to be restricted to a limited set of authorized users across multiple teams. This required defining ownership, access boundaries, approval processes, and operational guidelines to ensure that feature toggles were managed securely and consistently.
 
-Additionally, maintaining feature parity across environments, tracking flag usage and cleanup, and coordinating rollouts among dependent microservices posed ongoing challenges. Success depended on clear governance, proper documentation, and close collaboration between development, operations, and product teams to ensure controlled and reliable feature releases.
+* How did caching work?
 
-Key Challenges:
+The Unleash SDK maintained an in-memory cache of feature-toggle definitions within each microservice instance.
 
-Procuring and onboarding a hybrid Unleash Enterprise license.
-Managing feature flags consistently across DEV, QA, UAT, and PROD environments.
-Gaining familiarity with the Unleash dashboard and rollout strategies.
-Ensuring timely feature enablement/disablement without redeployments.
-Restricting dashboard access to authorized users through role-based controls.
-Defining ownership and governance for feature flag management across teams.
-Preventing configuration drift and maintaining environment-level consistency.
-Tracking stale flags and ensuring proper feature flag lifecycle management.
+When a feature flag was evaluated, the service generally read the toggle configuration from local memory rather than making a database or network call for every request. This made flag evaluation very fast and avoided introducing runtime dependency on the Unleash server for each business request.
+
+The cache typically contained:
+
+- Feature-toggle names
+- Enabled or disabled status
+- Activation strategies
+- Constraints and rollout configuration
+- Context-dependent evaluation information, where applicable
+The Java wrapper was responsible for creating and configuring the SDK client consistently across services.
+
+* How was the cache refreshed?
+
+The cache was refreshed asynchronously by the SDK at a configured polling interval. During refresh, the client contacted the Unleash server and retrieved the latest feature-toggle configuration.
+
+A typical flow was:
+
+- The microservice starts and initializes the Unleash client.
+- The client loads the initial feature-toggle configuration.
+- The configuration is stored in local memory.
+- A background process periodically polls the Unleash server.
+- The in-memory cache is updated when new configuration is received.
+- Feature evaluations continue to use the latest available local configuration.
+This design ensured that feature evaluation was not dependent on a remote call during every request.
+
+If the Unleash server temporarily became unavailable, the service could continue using the last successfully retrieved configuration, depending on the SDK and fallback configuration. This provided resilience, although the service would not immediately receive newly changed flags until connectivity was restored.
+
+* Were there latency issues because of the additional layer?
+
+The wrapper itself did not introduce a significant latency impact because it was mainly an initialization and configuration layer around the SDK. It did not make a network call for every feature-flag evaluation.
+
+The Unleash Java SDK optimizes for high-speed, thread-safe reads by employing immutable data structures combined with an AtomicReference. When the background thread fetches updated toggle configurations from the server, it constructs a entirely new, immutable representation of the state. Once constructed, it performs an atomic swap by updating the AtomicReference to point to the new configuration. 
+
+Because the runtime code only ever reads from the reference without modifying the underlying map, we avoid expensive locking mechanisms and eliminate the risk of ConcurrentModificationException entirely. This ensures that feature-flag evaluation remains an ultra-low latency, thread-safe operation, even under high concurrent load.
